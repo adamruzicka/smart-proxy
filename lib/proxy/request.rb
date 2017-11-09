@@ -10,7 +10,7 @@ module Proxy::HttpRequest
     end
 
     def query_string(input={})
-      input.map{|k,v| "#{CGI.escape(k.to_s)}=#{CGI.escape(v)}"}.join("&")
+      input.map{|k,v| encode(k, v) }.flatten.join("&")
     end
 
     def create_get(path, query={}, headers={})
@@ -38,6 +38,15 @@ module Proxy::HttpRequest
       req = add_headers(req, headers)
       req.body = body
       req
+    end
+
+    def encode(key, value)
+      if value.is_a?(Array)
+        key = CGI.escape(key.to_s) + '[]'
+        value.map { |v| "#{key}=#{CGI.escape(v)}" }
+      else
+        "#{CGI.escape(key.to_s)}=#{CGI.escape(value)}"
+      end
     end
   end
 
