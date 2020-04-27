@@ -9,6 +9,7 @@ module RedfishVendorOverridesDellInc
       poweraction('ForceOff')
       # REVIEW - I wonder if any kind of delay is needed for this to be reliable.
       poweraction('On')
+    end
   end
 
   def reset
