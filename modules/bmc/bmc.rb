@@ -16,7 +16,7 @@ module Proxy
     end
 
     def installed?(provider)
-      if provider == 'redfish' or provider == 'shell'
+      if provider == 'redfish' || provider == 'shell'
         true
       else
         Proxy::BMC::IPMI.installed?(provider)

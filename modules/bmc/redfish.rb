@@ -10,6 +10,10 @@ module Proxy
       include Proxy::Util
 
       def initialize(args)
+        @redfish_verify_ssl = Proxy::BMC::Plugin.settings.bmc_redfish_verify_ssl
+        # enforce SSL verification as a default, if the value isn't set in the config
+        # file, or is set to a "garbage" value (anything but boolean false)
+        @redfish_verify_ssl = true unless @redfish_verify_ssl == false
         super
         load_vendor_overrides
         @bmc
@@ -17,7 +21,7 @@ module Proxy
 
       def connect(args = { })
         # TODO probably verify should be an option.
-        connection = RedfishClient.new("https://#{args[:host]}/", verify: false)
+        connection = RedfishClient.new("https://#{args[:host]}/", verify: @redfish_verify_ssl)
         connection.login(args[:username], args[:password])
         connection
       end
@@ -178,7 +182,7 @@ module Proxy
       end
 
       def reset
-        host.Managers.Members[0].post({ 'Actions' => 'Reset' })
+        host.post(path: host.Managers.Members[0].Actions['#Manager.Reset']['target'], payload: { 'ResetType' => 'Reset' })
       end
 
       def model
@@ -198,7 +202,7 @@ module Proxy
 
       private
       def poweraction(action)
-        host.Systems.Members[0].post(payload: { 'Action' => 'Reset', 'ResetType' => action })
+        host.post(path: host.Systems.Members[0].Actions['#ComputerSystem.Reset']['target'], payload: { 'ResetType' => action })
       end
 
     end
