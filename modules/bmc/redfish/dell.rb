@@ -3,7 +3,7 @@ module RedfishVendorOverridesDellInc
   def powercycle
     # ForceRestart was added in Lifecycle Controller 3.30.30.30
     # prior to that, it required ForceOff followed by On.
-    if host.System.Members[0].Actions['#ComputerSystem.Reset']['ResetType@RedfishAllowableValues'].include? 'ForceRestart'
+    if system.Actions&.fetch('#ComputerSystem.Reset', {}).fetch('ResetType@RedfishAllowableValues', []).include? 'ForceRestart'
       poweraction('ForceRestart')
     else
       poweraction('ForceOff')
@@ -16,8 +16,9 @@ module RedfishVendorOverridesDellInc
     end
   end
 
-  def reset
-    host.post(path: host.Managers.Members[0].Actions['#Manager.Reset']['target'], payload: { 'ResetType' => 'GracefulRestart' })
+  def reset(type=nil)
+    logger.debug("BMC reset arg #{type.inspect} unused for Dell Redfish - GracefulRestart only") if type
+    host.post(path: manager.Actions&.fetch('#Manager.Reset', {})['target'], payload: { 'ResetType' => 'GracefulRestart' })
   end
 
 end

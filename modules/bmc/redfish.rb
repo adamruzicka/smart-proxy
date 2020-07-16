@@ -12,15 +12,14 @@ module Proxy
       def initialize(args)
         @redfish_verify_ssl = Proxy::BMC::Plugin.settings.bmc_redfish_verify_ssl
         # enforce SSL verification as a default, if the value isn't set in the config
-        # file, or is set to a "garbage" value (anything but boolean false)
-        @redfish_verify_ssl = true unless @redfish_verify_ssl == false
+        # and bail if it's set to something nonsensical
+        @redfish_verify_ssl = true if @redfish_verify_ssl.nil?
+        raise ::Proxy::Error::ConfigurationError.new("bmc_redfish_verify_ssl must be boolean (true/false)") unless [true, false].include?(@redfish_verify_ssl)
         super
         load_vendor_overrides
-        @bmc
       end
 
       def connect(args = { })
-        # TODO probably verify should be an option.
         connection = RedfishClient.new("https://#{args[:host]}/", verify: @redfish_verify_ssl)
         connection.login(args[:username], args[:password])
         connection
@@ -33,7 +32,7 @@ module Proxy
         begin
           mod = Kernel.const_get("RedfishVendorOverrides#{mfr}".to_sym)
         rescue NameError
-          # no extensions for this vendor
+          logger.debug "No #{mfr} specific overrides available - using generic Redfish calls"
           return
         end
         logger.debug "Extending Redfish with vendor overrides for #{mfr}"
@@ -41,12 +40,11 @@ module Proxy
       end
 
       def manufacturer
-        host.Systems.Members[0].Manufacturer
+        system.Manufacturer
       end
 
       # returns boolean if the test is successful
       def test
-        # pretty low-effort try, here. sufficient, though?
         begin
           host.Managers.Members.any?
         rescue NoMethodError
@@ -55,15 +53,15 @@ module Proxy
       end
 
       def identifystatus
-        host.Systems.Members[0].IndicatorLED.downcase
+        system.IndicatorLED&.downcase
       end
 
       def identifyon
-        host.Systems.Members[0].patch(payload: { 'IndicatorLED' => 'On' })
+        system.patch(payload: { 'IndicatorLED' => 'On' })
       end
 
       def identifyoff
-        host.Systems.Members[0].patch(payload: { 'IndicatorLED' => 'Off' })
+        system.patch(payload: { 'IndicatorLED' => 'Off' })
       end
 
       def poweroff(soft=false)
@@ -79,7 +77,7 @@ module Proxy
       end
 
       def powerstatus
-        host.Systems.Members[0].PowerState.downcase
+        system.PowerState&.downcase
       end
 
       def poweron?
@@ -91,7 +89,7 @@ module Proxy
       end
 
       def bootdevice
-        host.Systems.Members[0].Boot['BootSourceOverrideTarget']
+        system.Boot['BootSourceOverrideTarget']
       end
 
       def bootdevices
@@ -101,7 +99,10 @@ module Proxy
         # if in the future it becomes advantageous to do something more dynamic --
         # this is how to find out:
         #
-        #host.Systems.Members.Boot['BootSourceOverrideTarget@Redfish.AllowableValues']
+        #system.Boot['BootSourceOverrideTarget@Redfish.AllowableValues']
+        #
+        # There's an override for older HPs which have the list of boot devices at a
+        # different spot. (see HPE vendor overrides)
         #
         # Dell gives a list like [ None, Floppy, Cd, Hdd, SDCard, Utilities,
         #                          BiosSetup, Pxe ]
@@ -120,7 +121,7 @@ module Proxy
                    'disk'  => 'Hdd',
                    'pxe'   => 'Pxe' }
 
-        host.Systems.Members[0].patch(
+        system.patch(
           payload: {
             'Boot' => {
               'BootSourceOverrideTarget' => devmap[args[:device]],
@@ -147,54 +148,55 @@ module Proxy
       end
 
       def ip
-        host.Managers.Members[0].EthernetInterfaces.Members[0].IPv4Addresses.first['Address']
+        bmc_nic.IPv4Addresses&.first['Address']
       end
 
       def mac
-        host.Managers.Members[0].EthernetInterfaces.Members[0].MACAddress
+        bmc_nic.MACAddress
       end
 
       def gateway
-        host.Managers.Members[0].EthernetInterfaces.Members[0].IPv4Addresses.first['Gateway']
+        bmc_nic.IPv4Addresses&.first['Gateway']
       end
 
       def netmask
-        host.Managers.Members[0].EthernetInterfaces.Members[0].IPv4Addresses.first['SubnetMask']
+        bmc_nic.IPv4Addresses&.first['SubnetMask']
       end
 
       def vlanid
-        vlaninfo = host.Managers.Members[0].EthernetInterfaces.Members[0].VLAN
+        vlaninfo = bmc_nic.VLAN
         return unless vlaninfo # some older Proliants don't have a VLAN setting at all.
         return unless vlaninfo.VLANEnable
         vlaninfo.VLANId
       end
 
       def ipsrc
-        host.Managers.Members[0].EthernetInterfaces.Members[0].IPv4Addresses.first['AddressOrigin']
+        bmc_nic.IPv4Addresses&.first['AddressOrigin']
       end
 
       def guid
-        host.Managers.Members[0].UUID
+        manager.UUID
       end
 
       def version
-        host.Managers.Members[0].FirmwareVersion
+        manager.FirmwareVersion
       end
 
-      def reset
-        host.post(path: host.Managers.Members[0].Actions['#Manager.Reset']['target'], payload: { 'ResetType' => 'Reset' })
+      def reset(type=nil)
+        logger.debug("BMC reset arg #{type.inspect} unused for Redfish - standard reset only") if type
+        host.post(path: manager.Actions&.fetch('#Manager.Reset', {})['target'], payload: { 'ResetType' => 'Reset' })
       end
 
       def model
-        host.Systems.Members[0].Model
+        system.Model
       end
 
       def serial
-        host.Systems.Members[0].SerialNumber
+        system.SerialNumber
       end
 
       def asset_tag
-        host.Systems.Members[0].AssetTag
+        system.AssetTag
       end
 
       protected
@@ -202,7 +204,30 @@ module Proxy
 
       private
       def poweraction(action)
-        host.post(path: host.Systems.Members[0].Actions['#ComputerSystem.Reset']['target'], payload: { 'ResetType' => action })
+        host.post(path: system.Actions&.fetch('#ComputerSystem.Reset', {})['target'], payload: { 'ResetType' => action })
+      end
+
+      # I haven't yet encountered a system (apart from a blade chassis, which I think
+      # wouldn't be modeled in Foreman as a host?) which has multiple BMCs, managed systems,
+      # or BMC NICs. But it's part of the Redfish design, so it's at least possible that
+      # someone could. Warn if we encounter such a system, but try to carry on regardless.
+
+      def manager
+        managers = host.Managers&.Members
+        logger.warn("Chassis has multiple BMCs? - using first") if managers.length > 1
+        managers.first
+      end
+
+      def system
+        systems = host.Systems&.Members
+        logger.warn("BMC has multiple managed systems? - using first") if systems.length > 1
+        systems.first
+      end
+
+      def bmc_nic
+        nics = manager.EthernetInterfaces&.Members
+        logger.warn("BMC has multiple NICs? - using first") if nics.length > 1
+        nics.first
       end
 
     end

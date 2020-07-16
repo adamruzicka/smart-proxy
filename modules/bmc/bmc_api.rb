@@ -423,8 +423,12 @@ module Proxy::BMC
           log_halt 401, "bad_authentication_request, credentials are not in auth.basic format" unless auth.basic?
           username, password = auth.credentials
 
-          args = { :host     => params[:host], :username     => username, :options => body_parameters['options'],
-                   :password => password }
+          args = {
+            :host     => params[:host],
+            :username => username,
+            :options  => body_parameters['options'],
+            :password => password
+          }
           @bmc = Proxy::BMC::Redfish.new(args)
         when "shell"
           require 'bmc/shell'
