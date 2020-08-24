@@ -26,17 +26,15 @@ module Proxy
       end
 
       def load_vendor_overrides
-        mfr = manufacturer
-        return unless mfr
-        mfr.tr!('^A-Za-z', '')
-        begin
-          mod = Kernel.const_get("RedfishVendorOverrides#{mfr}".to_sym)
-        rescue NameError
-          logger.debug "No #{mfr} specific overrides available - using generic Redfish calls"
-          return
-        end
-        logger.debug "Extending Redfish with vendor overrides for #{mfr}"
-        self.extend mod
+        mod = case manufacturer
+              when 'Dell Inc.' then 'RedfishVendorOverridesDellInc'
+              when 'HPE'       then 'RedfishVendorOverridesHPE'
+              else
+                logger.debug "No #{manufacturer} specific overrides available - using generic Redfish calls"
+                return
+              end
+        logger.debug "Extending Redfish with vendor overrides for #{manufacturer}"
+        extend Kernel.const_get(mod.to_sym)
       end
 
       def manufacturer
@@ -45,11 +43,9 @@ module Proxy
 
       # returns boolean if the test is successful
       def test
-        begin
-          host.Managers.Members.any?
-        rescue NoMethodError
-          false
-        end
+        host.Managers.Members.any?
+      rescue NoMethodError
+        false
       end
 
       def identifystatus
@@ -64,8 +60,8 @@ module Proxy
         system.patch(payload: { 'IndicatorLED' => 'Off' })
       end
 
-      def poweroff(soft=false)
-        poweraction( soft ? 'GracefulShutdown' : 'ForceOff' )
+      def poweroff(soft = false)
+        poweraction(soft ? 'GracefulShutdown' : 'ForceOff')
       end
 
       def powercycle
@@ -99,7 +95,7 @@ module Proxy
         # if in the future it becomes advantageous to do something more dynamic --
         # this is how to find out:
         #
-        #system.Boot['BootSourceOverrideTarget@Redfish.AllowableValues']
+        #    system.Boot['BootSourceOverrideTarget@Redfish.AllowableValues']
         #
         # There's an override for older HPs which have the list of boot devices at a
         # different spot. (see HPE vendor overrides)
@@ -112,10 +108,10 @@ module Proxy
         #
         # For the four devices Foreman hardcodes, lucky for us all three use the same set
         # of values.
-        [ 'pxe', 'disk', 'bios', 'cdrom' ]
+        ['pxe', 'disk', 'bios', 'cdrom']
       end
 
-      def bootdevice=(args={ :device => nil, :reboot => false, :persistent => false })
+      def bootdevice=(args = { :device => nil, :reboot => false, :persistent => false })
         devmap = { 'bios'  => 'BiosSetup',
                    'cdrom' => 'Cd',
                    'disk'  => 'Hdd',
@@ -125,30 +121,30 @@ module Proxy
           payload: {
             'Boot' => {
               'BootSourceOverrideTarget' => devmap[args[:device]],
-              'BootSourceOverrideEnabled' => args[:persistent] ? 'Enabled' : 'Once'
+              'BootSourceOverrideEnabled' => args[:persistent] ? 'Enabled' : 'Once',
             }
           })
-        powercycle if reboot
+        powercycle if args[:reboot]
       end
 
-      def bootpxe(reboot=false, persistent=false)
-        bootdevice = { :device => 'pxe', :reboot => reboot, :persistent => persistent }
+      def bootpxe(reboot = false, persistent = false)
+        self.bootdevice = { :device => 'pxe', :reboot => reboot, :persistent => persistent }
       end
 
-      def bootdisk(reboot=false, persistent=false)
-        bootdevice = { :device => 'disk', :reboot => reboot, :persistent => persistent }
+      def bootdisk(reboot = false, persistent = false)
+        self.bootdevice = { :device => 'disk', :reboot => reboot, :persistent => persistent }
       end
 
-      def bootbios(reboot=false, persistent=false)
-        bootdevice = { :device => 'bios', :reboot => reboot, :persistent => persistent }
+      def bootbios(reboot = false, persistent = false)
+        self.bootdevice = { :device => 'bios', :reboot => reboot, :persistent => persistent }
       end
 
-      def bootcdrom(reboot=false, persistent=false)
-        bootdevice = { :device => 'cdrom', :reboot => reboot, :persistent => persistent }
+      def bootcdrom(reboot = false, persistent = false)
+        self.bootdevice = { :device => 'cdrom', :reboot => reboot, :persistent => persistent }
       end
 
       def ip
-        bmc_nic.IPv4Addresses&.first['Address']
+        bmc_nic.IPv4Addresses&.first&.[]('Address')
       end
 
       def mac
@@ -156,11 +152,11 @@ module Proxy
       end
 
       def gateway
-        bmc_nic.IPv4Addresses&.first['Gateway']
+        bmc_nic.IPv4Addresses&.first&.[]('Gateway')
       end
 
       def netmask
-        bmc_nic.IPv4Addresses&.first['SubnetMask']
+        bmc_nic.IPv4Addresses&.first&.[]('SubnetMask')
       end
 
       def vlanid
@@ -171,7 +167,7 @@ module Proxy
       end
 
       def ipsrc
-        bmc_nic.IPv4Addresses&.first['AddressOrigin']
+        bmc_nic.IPv4Addresses&.first&.[]('AddressOrigin')
       end
 
       def guid
@@ -182,9 +178,9 @@ module Proxy
         manager.FirmwareVersion
       end
 
-      def reset(type=nil)
+      def reset(type = nil)
         logger.debug("BMC reset arg #{type.inspect} unused for Redfish - standard reset only") if type
-        host.post(path: manager.Actions&.fetch('#Manager.Reset', {})['target'], payload: { 'ResetType' => 'Reset' })
+        host.post(path: manager.Actions&.[]('#Manager.Reset')&.[]('target'), payload: { 'ResetType' => 'Reset' })
       end
 
       def model
@@ -200,11 +196,13 @@ module Proxy
       end
 
       protected
+
       attr_reader :host
 
       private
+
       def poweraction(action)
-        host.post(path: system.Actions&.fetch('#ComputerSystem.Reset', {})['target'], payload: { 'ResetType' => action })
+        host.post(path: system.Actions&.[]('#ComputerSystem.Reset')&.[]('target'), payload: { 'ResetType' => action })
       end
 
       # I haven't yet encountered a system (apart from a blade chassis, which I think
@@ -229,7 +227,6 @@ module Proxy
         logger.warn("BMC has multiple NICs? - using first") if nics.length > 1
         nics.first
       end
-
     end
   end
 end

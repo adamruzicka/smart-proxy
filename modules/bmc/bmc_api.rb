@@ -427,7 +427,7 @@ module Proxy::BMC
             :host     => params[:host],
             :username => username,
             :options  => body_parameters['options'],
-            :password => password
+            :password => password,
           }
           @bmc = Proxy::BMC::Redfish.new(args)
         when "shell"
