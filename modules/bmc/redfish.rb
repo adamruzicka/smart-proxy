@@ -122,7 +122,7 @@ module Proxy
             'Boot' => {
               'BootSourceOverrideTarget' => devmap[args[:device]],
               'BootSourceOverrideEnabled' => args[:persistent] ? 'Enabled' : 'Once',
-            }
+            },
           })
         powercycle if args[:reboot]
       end
