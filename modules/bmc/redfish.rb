@@ -1,7 +1,5 @@
 require 'redfish_client'
 require 'bmc/base'
-require 'bmc/redfish/dell'
-require 'bmc/redfish/hpe'
 
 module Proxy
   module BMC
@@ -16,7 +14,6 @@ module Proxy
         @redfish_verify_ssl = true if @redfish_verify_ssl.nil?
         raise ::Proxy::Error::ConfigurationError.new("bmc_redfish_verify_ssl must be boolean (true/false)") unless [true, false].include?(@redfish_verify_ssl)
         super
-        load_vendor_overrides
       end
 
       def connect(args = { })
@@ -25,16 +22,18 @@ module Proxy
         connection
       end
 
-      def load_vendor_overrides
-        mod = case manufacturer
-              when 'Dell Inc.' then 'RedfishVendorOverridesDellInc'
-              when 'HPE'       then 'RedfishVendorOverridesHPE'
-              else
-                logger.debug "No #{manufacturer} specific overrides available - using generic Redfish calls"
-                return
-              end
-        logger.debug "Extending Redfish with vendor overrides for #{manufacturer}"
-        extend Kernel.const_get(mod.to_sym)
+      def determine_adapter
+        case manufacturer
+        when 'Dell Inc.' then RedfishAdapters::Dell
+        when 'HPE'       then RedfishAdapters::HPE
+        else
+          logger.debug "No #{manufacturer} specific overrides available - using generic Redfish calls"
+          return self
+        end.new(host)
+      end
+
+      def self.redfish_adapter(args)
+        self.new(args).determine_adapter
       end
 
       def manufacturer
@@ -230,3 +229,6 @@ module Proxy
     end
   end
 end
+
+require 'bmc/redfish_adapters/dell'
+require 'bmc/redfish_adapters/hpe'
