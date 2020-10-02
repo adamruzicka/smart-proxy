@@ -20,7 +20,6 @@ require 'proxy/plugin_initializer'
 require 'proxy/provider'
 require 'proxy/error'
 require 'proxy/request'
-require 'launcher'
 
 require 'sinatra/base'
 require 'sinatra/authorization'
