@@ -29,49 +29,12 @@ module Proxy
       ::Proxy::Plugins.instance
     end
 
-    def pid_status
-      return :exited unless File.exist?(pid_path)
-      pid = ::File.read(pid_path).to_i
-      return :dead if pid == 0
-      Process.kill(0, pid)
-      :running
-    rescue Errno::ESRCH
-      :dead
-    rescue Errno::EPERM
-      :not_owned
-    end
-
-    def check_pid
-      case pid_status
-      when :running, :not_owned
-        logger.error "A server is already running. Check #{pid_path}"
-        exit(2)
-      when :dead
-        File.delete(pid_path)
-      end
-    end
-
-    def write_pid
-      FileUtils.mkdir_p(File.dirname(pid_path)) unless File.exist?(pid_path)
-      File.open(pid_path, ::File::CREAT | ::File::EXCL | ::File::WRONLY) { |f| f.write(Process.pid.to_s) }
-      at_exit { File.delete(pid_path) if File.exist?(pid_path) }
-    rescue Errno::EEXIST
-      check_pid
-      retry
-    end
-
     def ciphers
       CIPHERS - settings.ssl_disabled_ciphers
     end
 
     def launch
       raise Exception.new("Both http and https are disabled, unable to start.") unless http_enabled? || https_enabled?
-
-      if settings.daemon
-        check_pid
-        Process.daemon
-        write_pid
-      end
 
       ::Proxy::PluginInitializer.new(::Proxy::Plugins.instance).initialize_plugins
 
