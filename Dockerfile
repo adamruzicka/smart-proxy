@@ -23,7 +23,7 @@ ARG RUBY_VERSION="3.1"
 RUN \
   dnf upgrade -y && \
   dnf module enable ruby:${RUBY_VERSION} -y && \
-  dnf install -y postgresql-libs ruby{,gems} rubygem-{rake,bundler} nc hostname && \
+  dnf install -y postgresql-libs ruby{,gems} rubygem-{rake,bundler} nc hostname openssh-clients && \
   dnf clean all
 
 ARG HOME=/home/foreman
