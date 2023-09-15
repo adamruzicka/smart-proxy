@@ -84,6 +84,6 @@ RUN cp config/settings.yml.example config/settings.yml && \
     echo ':log_file: STDOUT' >> config/settings.yml
 
 # Start the main process.
-CMD bundle exec ruby bin/smart-proxy
+CMD ["bash", "entrypoint.sh"]
 
 EXPOSE 8000/tcp
