@@ -50,7 +50,8 @@ module Proxy::Dynflow
         config.auto_rescue = true
         config.logger_adapter = logger_adapter
         config.persistence_adapter = persistence_adapter
-        config.execution_plan_cleaner = execution_plan_cleaner
+        # config.execution_plan_cleaner = execution_plan_cleaner
+        config.connector = ->(world, _) { ::Dynflow::Connectors::Database.new(world) }
         # TODO: There has to be a better way
         matchers = config.silent_dead_letter_matchers.call.concat(self.class.silencer_matchers)
         config.silent_dead_letter_matchers = matchers
