@@ -3,6 +3,10 @@ require 'proxy/settings'
 require 'proxy/signal_handler'
 require 'proxy/log_buffer/trace_decorator'
 require 'sd_notify'
+require 'async'
+require 'async/http/endpoint'
+require 'falcon/server'
+require 'protocol/rack'
 
 CIPHERS = ['ECDHE-RSA-AES128-GCM-SHA256', 'ECDHE-RSA-AES256-GCM-SHA384',
            'AES128-GCM-SHA256', 'AES256-GCM-SHA384', 'AES128-SHA256',
@@ -116,11 +120,31 @@ module Proxy
       raise e
     end
 
-    def webrick_server(app, addresses, port)
-      server = ::WEBrick::HTTPServer.new(app)
-      addresses.each { |a| server.listen(a, port) }
-      server.mount "/", Rack::Handler::WEBrick, app[:app]
-      server
+    def falcon_server(app, addresses, port)
+      rack_app = app[:app]
+
+      # Create endpoint for the given address and port
+      endpoint = Async::HTTP::Endpoint.parse("http://#{addresses.first}:#{port}")
+
+      # If SSL is enabled, wrap the endpoint with SSL
+      if app[:SSLEnable]
+        ssl_context = OpenSSL::SSL::SSLContext.new
+        ssl_context.cert = app[:SSLCertificate]
+        ssl_context.key = app[:SSLPrivateKey]
+        ssl_context.ca_file = app[:SSLCACertificateFile]
+        ssl_context.ssl_version = :TLSv1_2_server
+        ssl_context.ciphers = app[:SSLCiphers]
+        ssl_context.options = app[:SSLOptions]
+        ssl_context.verify_mode = app[:SSLVerifyClient]
+        
+        endpoint = Async::HTTP::Endpoint.parse("https://#{addresses.first}:#{port}", ssl_context: ssl_context)
+      end
+      
+      # Wrap Rack app with Protocol::Rack middleware
+      middleware = Protocol::Rack::Adapter.new(rack_app)
+      
+      # Create and return Falcon server
+      Falcon::Server.new(middleware, endpoint)
     end
 
     def launch
@@ -130,14 +154,29 @@ module Proxy
 
       http_app = http_app(settings.http_port)
       https_app = https_app(settings.https_port)
-      install_webrick_callback!(http_app, https_app)
 
-      t1 = Thread.new { webrick_server(https_app, settings.bind_host, settings.https_port).start } unless https_app.nil?
-      t2 = Thread.new { webrick_server(http_app, settings.bind_host, settings.http_port).start } unless http_app.nil?
+      servers = []
+      servers << falcon_server(https_app, settings.bind_host, settings.https_port) unless https_app.nil?
+      servers << falcon_server(http_app, settings.bind_host, settings.http_port) unless http_app.nil?
 
       Proxy::SignalHandler.install_traps
 
-      (t1 || t2).join
+      # Log that we're launching
+      launched(servers)
+
+      # Start all servers in a single async reactor using fibers
+      # This is the core benefit of Falcon - fiber-based concurrency
+      Async do |task|
+        # Start each server in its own fiber and collect the tasks
+        server_tasks = servers.map do |server|
+          task.async do
+            server.run
+          end
+        end
+        
+        # Wait for all server tasks (they run indefinitely until interrupted)
+        server_tasks.each(&:wait)
+      end
     rescue SignalException => e
       logger.debug("Caught #{e}. Exiting")
       raise
@@ -150,32 +189,14 @@ module Proxy
       exit(1)
     end
 
-    def install_webrick_callback!(*apps)
-      apps.compact!
-
-      # track how many webrick apps are still starting up
-      @pending_webrick = apps.size
-      @pending_webrick_lock = Mutex.new
-
-      apps.each do |app|
-        # add a callback to each server, decrementing the pending counter
-        app[:StartCallback] = lambda do
-          @pending_webrick_lock.synchronize do
-            @pending_webrick -= 1
-            launched(apps) if @pending_webrick.zero?
-          end
-        end
-      end
-    end
-
-    def launched(apps)
-      logger.info("Smart proxy has launched on #{apps.size} socket(s), waiting for requests")
+    def launched(servers)
+      logger.info("Smart proxy has launched on #{servers.size} socket(s), waiting for requests")
       SdNotify.ready
     end
 
     def base_app_settings
       {
-        :server => :webrick,
+        :server => :falcon,
         :DoNotListen => true,
         :ServerSoftware => "foreman-proxy/#{Proxy::VERSION}",
         :daemonize => false,

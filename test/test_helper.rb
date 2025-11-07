@@ -29,7 +29,7 @@ def hash_symbols_to_strings(hash)
   Hash[hash.collect { |k, v| [k.to_s, v] }]
 end
 
-# Starts up a real smart proxy instance under WEBrick
+# Starts up a real smart proxy instance under Falcon
 # Use sparingly.  API tests should use rack-test etc.
 module Proxy::IntegrationTestCase
   include Proxy::Log
@@ -39,15 +39,20 @@ module Proxy::IntegrationTestCase
   end
 
   def launch(protocol: 'https', plugins: [], settings: {})
-    port = 0
-    @settings = Proxy::Settings::Global.new(settings.merge("#{protocol}_port" => port))
+    # Get a random available port for testing
+    require 'socket'
+    test_port = TCPServer.open(0) { |s| s.addr[1] }
+    
+    @settings = Proxy::Settings::Global.new(settings.merge("#{protocol}_port" => test_port))
     @t = Thread.new do
       launcher = Proxy::Launcher.new(@settings)
-      app = launcher.public_send("#{protocol}_app", port, plugins)
-      server = launcher.webrick_server(app.merge(AccessLog: [Logger.new('/dev/null')]), ['localhost'], port)
-      # Read back the actual port it bound to
-      @settings["#{protocol}_port"] = server.listeners[0].addr[1]
-      server.start
+      app = launcher.public_send("#{protocol}_app", test_port, plugins)
+      server = launcher.falcon_server(app, ['localhost'], test_port)
+      
+      # Run server in async reactor (using fibers)
+      Async do
+        server.run
+      end
     end
     Timeout.timeout(2) do
       sleep(0.1) until can_connect?('localhost', @settings["#{protocol}_port"])

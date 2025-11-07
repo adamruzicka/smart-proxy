@@ -14,4 +14,5 @@ group :test do
   gem 'ruby-prof', '< 1.4'
   gem 'test-unit'
   gem 'webmock'
+  gem 'webrick', '~> 1.0' # Only used for test HTTP server
 end

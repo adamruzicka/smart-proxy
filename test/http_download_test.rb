@@ -1,5 +1,6 @@
 require 'test_helper'
 require 'tmpdir'
+require 'webrick'
 
 class HttpDownloadsTest < Test::Unit::TestCase
   def setup
