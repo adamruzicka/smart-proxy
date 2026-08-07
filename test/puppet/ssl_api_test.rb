@@ -75,4 +75,66 @@ class SslApiTest < Test::Unit::TestCase
 
     assert_equal 502, last_response.status
   end
+
+  def puppetca_entry(state, autosigner = nil)
+    di_container = mock('di_container')
+    di_container.stubs(:get_dependency).with(:autosigner).returns(autosigner)
+    {:name => :puppetca, :state => state, :di_container => di_container}
+  end
+
+  def token_whitelisting_autosigner(valid)
+    Class.new do
+      define_method(:validate_csr) { |_body| valid }
+    end.new
+  end
+
+  def hostname_whitelisting_autosigner
+    Object.new
+  end
+
+  def test_ca_validate_returns_200_for_valid_csr
+    ::Proxy::Plugins.instance.stubs(:find).returns(puppetca_entry(:running, token_whitelisting_autosigner(true)))
+
+    post '/puppet/ca/validate', 'csr-body', https_client_cert_env('puppetserver.example.com')
+
+    assert last_response.ok?
+  end
+
+  def test_ca_validate_returns_404_for_invalid_csr
+    ::Proxy::Plugins.instance.stubs(:find).returns(puppetca_entry(:running, token_whitelisting_autosigner(false)))
+
+    post '/puppet/ca/validate', 'csr-body', https_client_cert_env('puppetserver.example.com')
+
+    assert_equal 404, last_response.status
+  end
+
+  def test_ca_validate_returns_not_implemented_when_puppetca_not_running
+    ::Proxy::Plugins.instance.stubs(:find).returns(puppetca_entry(:disabled))
+
+    post '/puppet/ca/validate', 'csr-body', https_client_cert_env('puppetserver.example.com')
+
+    assert_equal 501, last_response.status
+  end
+
+  def test_ca_validate_returns_not_implemented_when_puppetca_absent
+    ::Proxy::Plugins.instance.stubs(:find).returns(nil)
+
+    post '/puppet/ca/validate', 'csr-body', https_client_cert_env('puppetserver.example.com')
+
+    assert_equal 501, last_response.status
+  end
+
+  def test_ca_validate_returns_not_implemented_when_autosigner_does_not_support_it
+    ::Proxy::Plugins.instance.stubs(:find).returns(puppetca_entry(:running, hostname_whitelisting_autosigner))
+
+    post '/puppet/ca/validate', 'csr-body', https_client_cert_env('puppetserver.example.com')
+
+    assert_equal 501, last_response.status
+  end
+
+  def test_ca_validate_disallowed_cn_is_forbidden
+    post '/puppet/ca/validate', 'csr-body', https_client_cert_env('someone-else.example.com')
+
+    assert last_response.forbidden?
+  end
 end

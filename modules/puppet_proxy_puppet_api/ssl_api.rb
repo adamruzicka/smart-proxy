@@ -23,6 +23,20 @@ module Proxy::PuppetApi
       relay { SslForwarderRequest.new.forward_get("/node/#{params[:certname]}", request, :format => 'yml') }
     end
 
+    post '/puppet/ca/validate' do
+      entry = ::Proxy::Plugins.instance.find { |p| p[:name] == :puppetca }
+      log_halt 501, "PuppetCA module is not enabled" unless entry && entry[:state] == :running
+
+      autosigner = entry[:di_container].get_dependency(:autosigner)
+      log_halt 501, "Provider only supports trivial autosigning" unless autosigner.respond_to?(:validate_csr)
+
+      request.body.rewind
+      autosigner.validate_csr(request.body.read) ? 200 : 404
+    rescue StandardError => e
+      logger.exception "Failed to validate CSR", e
+      log_halt 406, e, "Failed to validate CSR"
+    end
+
     private
 
     def relay
