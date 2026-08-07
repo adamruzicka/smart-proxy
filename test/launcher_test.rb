@@ -206,30 +206,14 @@ class LauncherPuppetSslTest < Test::Unit::TestCase
     {:puppet_ssl_ca => '/ca.pem', :puppet_ssl_cert => '/cert.pem', :puppet_ssl_key => '/key.pem', :puppet_ssl_port => 8140}
   end
 
-  def test_puppet_ssl_settings_returns_settings_when_puppet_plugin_running
-    entry = {:name => :puppet, :state => :running, :settings => full_settings}
-    ::Proxy::Plugins.instance.expects(:find).returns(entry)
+  def test_puppet_ssl_settings_delegates_to_puppet_ssl
+    ::Proxy::PuppetSsl.expects(:settings).returns(full_settings)
     assert_equal full_settings, @launcher.puppet_ssl_settings
   end
 
-  def test_puppet_ssl_settings_returns_nil_when_puppet_plugin_not_found
-    ::Proxy::Plugins.instance.expects(:find).returns(nil)
-    assert_nil @launcher.puppet_ssl_settings
-  end
-
-  def test_puppet_ssl_enabled_true_when_fully_configured
-    @launcher.stubs(:puppet_ssl_settings).returns(full_settings)
+  def test_puppet_ssl_enabled_delegates_to_puppet_ssl
+    ::Proxy::PuppetSsl.expects(:enabled?).returns(true)
     assert @launcher.puppet_ssl_enabled?
-  end
-
-  def test_puppet_ssl_enabled_false_when_settings_missing
-    @launcher.stubs(:puppet_ssl_settings).returns(nil)
-    assert !@launcher.puppet_ssl_enabled?
-  end
-
-  def test_puppet_ssl_enabled_false_when_port_not_configured
-    @launcher.stubs(:puppet_ssl_settings).returns(full_settings.merge(:puppet_ssl_port => nil))
-    assert !@launcher.puppet_ssl_enabled?
   end
 
   def test_puppet_ssl_app_returns_nil_when_disabled

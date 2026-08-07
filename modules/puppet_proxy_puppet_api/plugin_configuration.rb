@@ -1,9 +1,20 @@
+require 'uri'
+
 module ::Proxy::PuppetApi
   class PluginConfiguration
     def load_programmable_settings(settings)
       settings[:classes_retriever] = :apiv3
       settings[:environments_retriever] = :apiv3
+      if settings[:puppet_ssl_trusted_hosts].nil? || settings[:puppet_ssl_trusted_hosts].empty?
+        settings[:puppet_ssl_trusted_hosts] = default_puppet_ssl_trusted_hosts(settings[:puppet_url])
+      end
       settings
+    end
+
+    def default_puppet_ssl_trusted_hosts(puppet_url)
+      [URI.parse(puppet_url.to_s).host].compact
+    rescue URI::InvalidURIError
+      []
     end
 
     def load_classes

@@ -13,6 +13,21 @@ class PuppetApiConfigurationTest < Test::Unit::TestCase
   def test_load_programmable_settings_sets_environments_retriever
     assert_equal :apiv3, @configuration.load_programmable_settings({})[:environments_retriever]
   end
+
+  def test_load_programmable_settings_defaults_puppet_ssl_trusted_hosts_from_puppet_url
+    settings = @configuration.load_programmable_settings(:puppet_url => 'https://puppet.example.com:8140')
+    assert_equal ['puppet.example.com'], settings[:puppet_ssl_trusted_hosts]
+  end
+
+  def test_load_programmable_settings_keeps_configured_puppet_ssl_trusted_hosts
+    settings = @configuration.load_programmable_settings(:puppet_url => 'https://puppet.example.com:8140', :puppet_ssl_trusted_hosts => ['compiler1.example.com', 'compiler2.example.com'])
+    assert_equal ['compiler1.example.com', 'compiler2.example.com'], settings[:puppet_ssl_trusted_hosts]
+  end
+
+  def test_load_programmable_settings_defaults_to_empty_array_for_invalid_puppet_url
+    settings = @configuration.load_programmable_settings(:puppet_url => "http://invalid url with spaces")
+    assert_equal [], settings[:puppet_ssl_trusted_hosts]
+  end
 end
 
 class PuppetApiDefaultSettingsTest < Test::Unit::TestCase

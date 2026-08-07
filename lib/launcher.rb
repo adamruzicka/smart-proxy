@@ -3,6 +3,7 @@ require 'proxy/log'
 require 'proxy/settings'
 require 'proxy/signal_handler'
 require 'proxy/log_buffer/trace_decorator'
+require 'proxy/puppet_ssl'
 require 'sd_notify'
 
 CRYPTO_POLICIES_CONFIG = '/etc/crypto-policies/back-ends/opensslcnf.config'.freeze
@@ -91,18 +92,12 @@ module Proxy
       base_app_settings.merge(https_settings)
     end
 
-    # Settings exposed by the puppet plugin group (puppet_proxy_puppet_api provider),
-    # only present while that plugin group is enabled and running. This ties the puppet
-    # SSL listener's lifecycle to the rest of the puppet integration instead of giving it
-    # an independent enable switch.
     def puppet_ssl_settings
-      entry = ::Proxy::Plugins.instance.find { |p| p[:name] == :puppet && p[:state] == :running }
-      entry && entry[:settings]
+      ::Proxy::PuppetSsl.settings
     end
 
     def puppet_ssl_enabled?
-      s = puppet_ssl_settings
-      !s.nil? && s[:puppet_ssl_ca] && s[:puppet_ssl_cert] && s[:puppet_ssl_key] && s[:puppet_ssl_port]
+      ::Proxy::PuppetSsl.enabled?
     end
 
     def puppet_ssl_app
@@ -116,7 +111,10 @@ module Proxy
         logger.error "Unable to read #{s[:puppet_ssl_ca]}. Are the values correct in puppet_proxy_puppet_api.yml and do permissions allow reading?"
       end
 
-      app = Rack::Builder.new {}
+      require 'puppet_proxy_puppet_api/ssl_api'
+      app = Rack::Builder.new do
+        run Proxy::PuppetApi::SslApi
+      end
 
       tls_ciphers = resolve_tls_ciphers
       cipher_list, ciphersuites = validate_tls_ciphers!(tls_ciphers)
