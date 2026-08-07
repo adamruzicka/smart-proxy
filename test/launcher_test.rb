@@ -196,3 +196,61 @@ class LauncherSslCipherTest < Test::Unit::TestCase
     assert_match(/NOT_A_VALID_CIPHER_STRING!!!/, error.message)
   end
 end
+
+class LauncherPuppetSslTest < Test::Unit::TestCase
+  def setup
+    @launcher = Proxy::Launcher.new
+  end
+
+  def full_settings
+    {:puppet_ssl_ca => '/ca.pem', :puppet_ssl_cert => '/cert.pem', :puppet_ssl_key => '/key.pem', :puppet_ssl_port => 8140}
+  end
+
+  def test_puppet_ssl_settings_returns_settings_when_puppet_plugin_running
+    entry = {:name => :puppet, :state => :running, :settings => full_settings}
+    ::Proxy::Plugins.instance.expects(:find).returns(entry)
+    assert_equal full_settings, @launcher.puppet_ssl_settings
+  end
+
+  def test_puppet_ssl_settings_returns_nil_when_puppet_plugin_not_found
+    ::Proxy::Plugins.instance.expects(:find).returns(nil)
+    assert_nil @launcher.puppet_ssl_settings
+  end
+
+  def test_puppet_ssl_enabled_true_when_fully_configured
+    @launcher.stubs(:puppet_ssl_settings).returns(full_settings)
+    assert @launcher.puppet_ssl_enabled?
+  end
+
+  def test_puppet_ssl_enabled_false_when_settings_missing
+    @launcher.stubs(:puppet_ssl_settings).returns(nil)
+    assert !@launcher.puppet_ssl_enabled?
+  end
+
+  def test_puppet_ssl_enabled_false_when_port_not_configured
+    @launcher.stubs(:puppet_ssl_settings).returns(full_settings.merge(:puppet_ssl_port => nil))
+    assert !@launcher.puppet_ssl_enabled?
+  end
+
+  def test_puppet_ssl_app_returns_nil_when_disabled
+    @launcher.stubs(:puppet_ssl_enabled?).returns(false)
+    assert_nil @launcher.puppet_ssl_app
+  end
+
+  def test_puppet_ssl_app_builds_webrick_settings_when_enabled
+    @launcher.stubs(:puppet_ssl_settings).returns(full_settings)
+    @launcher.stubs(:puppet_ssl_enabled?).returns(true)
+    File.stubs(:readable?).with('/ca.pem').returns(true)
+    @launcher.stubs(:load_ssl_private_key).with('/key.pem').returns(:a_key)
+    @launcher.stubs(:load_ssl_certificate).with('/cert.pem').returns(:a_cert)
+
+    app = @launcher.puppet_ssl_app
+
+    assert_equal 8140, app[:Port]
+    assert_equal true, app[:SSLEnable]
+    assert_equal OpenSSL::SSL::VERIFY_PEER, app[:SSLVerifyClient]
+    assert_equal :a_key, app[:SSLPrivateKey]
+    assert_equal :a_cert, app[:SSLCertificate]
+    assert_equal '/ca.pem', app[:SSLCACertificateFile]
+  end
+end

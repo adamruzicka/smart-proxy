@@ -91,6 +91,53 @@ module Proxy
       base_app_settings.merge(https_settings)
     end
 
+    # Settings exposed by the puppet plugin group (puppet_proxy_puppet_api provider),
+    # only present while that plugin group is enabled and running. This ties the puppet
+    # SSL listener's lifecycle to the rest of the puppet integration instead of giving it
+    # an independent enable switch.
+    def puppet_ssl_settings
+      entry = ::Proxy::Plugins.instance.find { |p| p[:name] == :puppet && p[:state] == :running }
+      entry && entry[:settings]
+    end
+
+    def puppet_ssl_enabled?
+      s = puppet_ssl_settings
+      !s.nil? && s[:puppet_ssl_ca] && s[:puppet_ssl_cert] && s[:puppet_ssl_key] && s[:puppet_ssl_port]
+    end
+
+    def puppet_ssl_app
+      s = puppet_ssl_settings
+      unless puppet_ssl_enabled?
+        logger.debug "Puppet plugin not running or puppet_ssl_ca/puppet_ssl_cert/puppet_ssl_key/puppet_ssl_port not fully configured, puppet SSL listener is disabled."
+        return nil
+      end
+
+      unless File.readable?(s[:puppet_ssl_ca])
+        logger.error "Unable to read #{s[:puppet_ssl_ca]}. Are the values correct in puppet_proxy_puppet_api.yml and do permissions allow reading?"
+      end
+
+      app = Rack::Builder.new {}
+
+      tls_ciphers = resolve_tls_ciphers
+      cipher_list, ciphersuites = validate_tls_ciphers!(tls_ciphers)
+
+      puppet_ssl_settings_hash = {
+        :app => app,
+        :Port => s[:puppet_ssl_port], # only being used to correctly log the port being used
+        :Logger => ::Proxy::LogBuffer::Decorator.instance,
+        :SSLEnable => true,
+        :SSLVerifyClient => OpenSSL::SSL::VERIFY_PEER,
+        :SSLPrivateKey => load_ssl_private_key(s[:puppet_ssl_key]),
+        :SSLCertificate => load_ssl_certificate(s[:puppet_ssl_cert]),
+        :SSLCACertificateFile => s[:puppet_ssl_ca],
+        :SSLOptions => build_ssl_options,
+        :SSLCiphers => cipher_list,
+        :SSLCiphersuites => ciphersuites,
+        :SSLMinVersion => resolve_tls_min_version,
+      }
+      base_app_settings.merge(puppet_ssl_settings_hash)
+    end
+
     def build_ssl_options
       ssl_options = OpenSSL::SSL::SSLContext::DEFAULT_PARAMS[:options]
       ssl_options |= OpenSSL::SSL::OP_CIPHER_SERVER_PREFERENCE
@@ -214,14 +261,16 @@ module Proxy
 
       http_app = http_app(settings.http_port)
       https_app = https_app(settings.https_port)
-      install_webrick_callback!(http_app, https_app)
+      puppet_ssl_app = puppet_ssl_app()
+      install_webrick_callback!(http_app, https_app, puppet_ssl_app)
 
       t1 = Thread.new { webrick_server(https_app, settings.bind_host, settings.https_port).start } unless https_app.nil?
       t2 = Thread.new { webrick_server(http_app, settings.bind_host, settings.http_port).start } unless http_app.nil?
+      t3 = Thread.new { webrick_server(puppet_ssl_app, settings.bind_host, puppet_ssl_app[:Port]).start } unless puppet_ssl_app.nil?
 
       Proxy::SignalHandler.install_traps
 
-      (t1 || t2).join
+      [t1, t2, t3].compact.each(&:join)
     rescue SignalException => e
       logger.debug("Caught #{e}. Exiting")
       raise

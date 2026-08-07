@@ -9,3 +9,8 @@
 #
 # Smart Proxy api timeout when Puppet's environment classes api is used and classes cache is disabled
 #:api_timeout: 30
+#
+# Port for an additional HTTPS listener authenticated with the puppet_ssl_ca/cert/key
+# above, intended for puppetserver to talk to (e.g. to submit reports) without needing
+# a certificate trusted by the proxy's own CA. Leave unset to disable this listener.
+#:puppet_ssl_port:
