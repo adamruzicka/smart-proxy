@@ -1,5 +1,7 @@
+require 'json'
 require 'proxy/puppet_ssl'
 require 'puppet_proxy_puppet_api/ssl_forwarder_request'
+require 'puppet_proxy_puppet_api/report_format12_transformer'
 
 module Proxy::PuppetApi
   class SslApi < ::Sinatra::Base
@@ -12,7 +14,9 @@ module Proxy::PuppetApi
     end
 
     post '/puppet/reports' do
-      relay { SslForwarderRequest.new.forward_post('/api/config_reports', request) }
+      raw_body = request.body.read
+      body = report_body(raw_body)
+      relay { SslForwarderRequest.new.forward_post('/api/config_reports', request, body) }
     end
 
     post '/puppet/facts' do
@@ -38,6 +42,17 @@ module Proxy::PuppetApi
     end
 
     private
+
+    def report_body(raw_body)
+      parsed = JSON.parse(raw_body)
+      return raw_body unless parsed.is_a?(Hash) && parsed.key?('report_format')
+
+      {'config_report' => ReportFormat12Transformer.transform(parsed)}.to_json
+    rescue JSON::ParserError
+      raw_body
+    rescue ReportFormat12Transformer::InvalidReport => e
+      log_halt 400, e, "Invalid report_format 12 payload"
+    end
 
     def relay
       response = yield

@@ -45,4 +45,12 @@ class SslForwarderRequestTest < Test::Unit::TestCase
     assert_equal '422', result.code
     assert_equal 'invalid', result.body
   end
+
+  def test_forward_post_uses_explicit_body_over_request_body
+    stub_request(:post, "#{@foreman_url}/api/config_reports").with(:body => 'overridden').to_return(:status => 200, :body => 'ok')
+
+    result = @request.forward_post('/api/config_reports', rack_request(:input => 'original'), 'overridden')
+
+    assert_equal '200', result.code
+  end
 end

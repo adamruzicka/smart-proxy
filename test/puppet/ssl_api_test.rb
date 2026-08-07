@@ -76,6 +76,56 @@ class SslApiTest < Test::Unit::TestCase
     assert_equal 502, last_response.status
   end
 
+  def format12_report
+    {
+      'report_format' => 12,
+      'host' => 'test.example.com',
+      'time' => '2024-01-01T12:00:00Z',
+      'status' => 'changed',
+      'metrics' => {
+        'resources' => {'name' => 'resources', 'label' => 'Resources', 'values' => [
+          ['restarted', 'Restarted', 0], ['failed', 'Failed', 0],
+          ['failed_to_restart', 'Failed to restart', 0], ['skipped', 'Skipped', 0]
+        ]},
+        'events' => {'name' => 'events', 'label' => 'Events', 'values' => [['noop', 'Noop', 0], ['total', 'Total', 0]]},
+        'changes' => {'name' => 'changes', 'label' => 'Changes', 'values' => [['total', 'Total', 0]]},
+      },
+      'logs' => [],
+    }
+  end
+
+  def test_format12_report_is_transformed_before_forwarding
+    expected_body = {'config_report' => Proxy::PuppetApi::ReportFormat12Transformer.transform(format12_report)}.to_json
+    stub_request(:post, "#{@foreman_url}/api/config_reports").with(:body => expected_body).to_return(:status => 200, :body => 'ok')
+
+    post '/puppet/reports', format12_report.to_json, https_client_cert_env('puppetserver.example.com')
+
+    assert last_response.ok?
+  end
+
+  def test_non_format12_report_body_passes_through_unchanged
+    body = '{"config_report":{"host":"test.example.com"}}'
+    stub_request(:post, "#{@foreman_url}/api/config_reports").with(:body => body).to_return(:status => 200, :body => 'ok')
+
+    post '/puppet/reports', body, https_client_cert_env('puppetserver.example.com')
+
+    assert last_response.ok?
+  end
+
+  def test_non_json_report_body_passes_through_unchanged
+    stub_request(:post, "#{@foreman_url}/api/config_reports").with(:body => 'not json at all').to_return(:status => 200, :body => 'ok')
+
+    post '/puppet/reports', 'not json at all', https_client_cert_env('puppetserver.example.com')
+
+    assert last_response.ok?
+  end
+
+  def test_malformed_format12_report_returns_bad_request_without_contacting_foreman
+    post '/puppet/reports', {'report_format' => 12}.to_json, https_client_cert_env('puppetserver.example.com')
+
+    assert_equal 400, last_response.status
+  end
+
   def puppetca_entry(state, autosigner = nil)
     di_container = mock('di_container')
     di_container.stubs(:get_dependency).with(:autosigner).returns(autosigner)

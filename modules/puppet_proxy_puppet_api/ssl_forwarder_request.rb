@@ -5,8 +5,8 @@ module Proxy::PuppetApi
   class SslForwarderRequest < ::Proxy::HttpRequest::ForemanRequest
     include ::Proxy::Log
 
-    def forward_post(foreman_path, request)
-      send_request(request_factory.create_post(foreman_path, request.body.read, headers(request)))
+    def forward_post(foreman_path, request, body = request.body.read)
+      send_request(request_factory.create_post(foreman_path, body, headers(request)))
     end
 
     def forward_get(foreman_path, request, query = {})
